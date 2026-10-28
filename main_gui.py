@@ -32,6 +32,37 @@ import pyaudio
 import wx
 import wx.lib.masked.ipaddrctrl as ipctrl
 import wx.lib.agw.peakmeter as PM
+import wx.lib.buttons as buttons
+
+
+IS_MAC = sys.platform == "darwin"
+
+# SYNC button colours on macOS (native buttons ignore colours there)
+SYNC_ON_COLOUR = wx.Colour(0, 140, 0)
+SYNC_OFF_COLOUR = wx.Colour(200, 0, 0)
+
+
+class _CentredLabelMixin:
+    """Draws (multi-line) labels centred, GenButton only centres a single line"""
+
+    def DrawLabel(self, dc, width, height, dx=0, dy=0):
+        dc.SetFont(self.GetFont())
+        if self.IsEnabled():
+            dc.SetTextForeground(self.GetForegroundColour())
+        else:
+            dc.SetTextForeground(wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT))
+        if not self.up:
+            dx = dy = self.labelDelta
+        dc.DrawLabel(self.GetLabel(), wx.Rect(dx, dy, width, height), wx.ALIGN_CENTER)
+
+
+class FlatToggleButton(_CentredLabelMixin, buttons.GenToggleButton):
+    """Self drawn toggle button that honours colours and stretches (used on macOS)"""
+
+    def __init__(self, parent, label):
+        super().__init__(parent, wx.ID_ANY, label)
+        self.SetBezelWidth(1)
+        self.SetUseFocusIndicator(False)
 
 
 class Main_Frame(wx.Frame):
@@ -269,15 +300,20 @@ class Main_Frame(wx.Frame):
 
 # SYNC BUTTON
         self.sevenseg_button_sizer = wx.BoxSizer(orient=wx.VERTICAL)
-        self.button_sync = wx.ToggleButton(panel, label='S\nY\nN\nC')  # \n➜
-        self.button_sync.SetForegroundColour((150, 220, 150))
+        if IS_MAC:
+            # filled green "SYNC ON" / red "SYNC OFF", native buttons ignore colours on macOS
+            self.button_sync = FlatToggleButton(panel, label='SYNC\nON')
+            self.Bind(wx.EVT_BUTTON, self.on_button_sync, self.button_sync)
+        else:
+            self.button_sync = wx.ToggleButton(panel, label='S\nY\nN\nC')  # \n➜
+            self.Bind(wx.EVT_TOGGLEBUTTON, self.on_button_sync, self.button_sync)
+        self.set_sync_colours(True)
         self.button_sync.SetValue(True)
         #self.button_sync.SetFont(wx.Font(25, family=wx.DEFAULT, style=wx.NORMAL, weight=wx.BOLD))
         self.button_sync.SetFont(buttonfont)
         self.buttons_to_disable.append(self.button_sync)
         #sevenseg_sizer.Add(self.button_sync, 1, wx.EXPAND | wx.UP, 5)
         self.sevenseg_button_sizer.Add(self.button_sync, 3, wx.EXPAND, 5)
-        self.Bind(wx.EVT_TOGGLEBUTTON, self.on_button_sync, self.button_sync)
         
 # Live Halftime Button
         self.button_halftime = wx.ToggleButton(panel, label='1/2')
@@ -615,7 +651,7 @@ class Main_Frame(wx.Frame):
         if not state and self.sync:
             self.bpm_thread_wait_and_terminate.clear()  # clearing thread terminating event
             self.sync = False
-            self.button_sync.SetForegroundColour((220, 150, 150))
+            self.set_sync_colours(False)
             # self.button_sync.SetLabel('❌')
             
             self.button_sync.SetValue(False)
@@ -633,7 +669,7 @@ class Main_Frame(wx.Frame):
             self.bpm_thread_wait_and_terminate.set()  # setting thread terminating event
             self.sync = False
             self.sync = True
-            self.button_sync.SetForegroundColour((150, 220, 150))
+            self.set_sync_colours(True)
             # self.button_sync.SetLabel('➜')
             self.button_sync.SetValue(True)
             
@@ -641,6 +677,20 @@ class Main_Frame(wx.Frame):
             self.button_halftime.Enable()
         else:
             print("Sync state already set to {}".format(state))
+
+    def set_sync_colours(self, state: bool):
+        """Shows the sync state on the SYNC button
+
+        Args:
+            state (bool): sync on (green) or off (red)
+        """
+        if IS_MAC:
+            self.button_sync.SetLabel('SYNC\nON' if state else 'SYNC\nOFF')
+            self.button_sync.SetBackgroundColour(SYNC_ON_COLOUR if state else SYNC_OFF_COLOUR)
+            self.button_sync.SetForegroundColour(wx.WHITE)
+            self.button_sync.Refresh()
+        else:
+            self.button_sync.SetForegroundColour((150, 220, 150) if state else (220, 150, 150))
 
     def update_bpm_display(self, bpm, send_to: str = "both", Blink=False):
         """Iterates through digits and sets them accordinglly
