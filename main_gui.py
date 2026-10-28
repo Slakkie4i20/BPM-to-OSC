@@ -199,8 +199,15 @@ class Main_Frame(wx.Frame):
         #title_connect = wx.StaticText(panel, label="OSC Adress and Port")
 
         # Textbox IP-Adress
-        self.text_ip = ipctrl.IpAddrCtrl(panel)
-        self.text_ip.SetValue(self.config['OSC']['IP'])
+        if IS_MAC:
+            # plain text field, the masked IpAddrCtrl is unreliable on Cocoa
+            self.text_ip = wx.TextCtrl(panel, value=osc_client.normalize_ip(self.config['OSC']['IP']), size=(140, -1))
+            self.text_ip.SetToolTip("IPv4 address, e.g. 192.168.1.10")
+            self.text_ip.Bind(wx.EVT_TEXT, self.on_ip_text)
+            self.text_ip.Bind(wx.EVT_KILL_FOCUS, self.on_ip_focus_lost)
+        else:
+            self.text_ip = ipctrl.IpAddrCtrl(panel)
+            self.text_ip.SetValue(self.config['OSC']['IP'])
         self.ip_stuff_sizer.Add(self.text_ip, 0, wx.LEFT | wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, border=5)
 
         # Numberbox Port
@@ -601,13 +608,22 @@ class Main_Frame(wx.Frame):
                 self.button_startstop.SetValue(False)
                 return
 
+            if IS_MAC:
+                ip = self.validated_ip()
+                if ip is None:
+                    self.button_startstop.SetValue(False)
+                    return
+
             print("Starting")
             device_index = self.input_devices[selection]
 
             # save input to config
             self.config['AUDIO']['device_index'] = str(selection)
             self.config['AUDIO']['device_name'] = self.audio.get_device_info_by_index(device_index).get('name')
-            self.config['OSC']['IP'] = self.text_ip.GetValue().replace(" ", "")
+            if IS_MAC:
+                self.config['OSC']['IP'] = ip
+            else:
+                self.config['OSC']['IP'] = self.text_ip.GetValue().replace(" ", "")
             self.config['OSC']['PORT'] = str(self.text_port.GetValue())
 
             # create worker instances
@@ -655,7 +671,15 @@ class Main_Frame(wx.Frame):
         self.ip_stuff_sizer.Layout()
 
         # save input to config
-        self.config['OSC']['IP'] = self.text_ip.GetValue()
+        if IS_MAC:
+            ip = self.validated_ip()
+            if ip is None:
+                wx.SetCursor(wx.Cursor(wx.CURSOR_DEFAULT))
+                self.button_ping.Enable()
+                return
+            self.config['OSC']['IP'] = ip
+        else:
+            self.config['OSC']['IP'] = self.text_ip.GetValue()
         self.config['OSC']['PORT'] = str(self.text_port.GetValue())
 
         # send ping (with a short timeout, an unreachable host would otherwise block the GUI)
@@ -685,6 +709,36 @@ class Main_Frame(wx.Frame):
         # gui restore
         wx.SetCursor(wx.Cursor(wx.CURSOR_DEFAULT))
         self.button_ping.Enable()
+
+    def validated_ip(self):
+        """Checks the IP text field (macOS)
+
+        Returns:
+            str | None: normalized IPv4 address, None (and "Invalid IP" status) if invalid
+        """
+        ip = osc_client.parse_ip(self.text_ip.GetValue())
+        if ip is None:
+            self.connection_ok = False
+            self.text_connection.SetForegroundColour(self.status_error)
+            self.text_connection.SetLabel("Invalid IP")
+            self.ip_stuff_sizer.Layout()
+        else:
+            self.text_ip.ChangeValue(ip)
+        return ip
+
+    def on_ip_text(self, event):
+        """Shows the IP in red while it isn't a valid IPv4 address (macOS)"""
+        valid = osc_client.parse_ip(self.text_ip.GetValue()) is not None
+        self.text_ip.SetForegroundColour(
+            wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT) if valid else self.status_error)
+        self.text_ip.Refresh()
+
+    def on_ip_focus_lost(self, event):
+        """Strips leading zeros once editing is done (macOS)"""
+        event.Skip()
+        ip = osc_client.parse_ip(self.text_ip.GetValue())
+        if ip is not None and ip != self.text_ip.GetValue():
+            self.text_ip.ChangeValue(ip)
 
     def switch_sync(self, state: bool):
         """Changes state of sync flag and button\n
@@ -756,6 +810,7 @@ class Main_Frame(wx.Frame):
         self.set_startstop_colours(self.running)
         for button in self.flat_buttons:
             self.set_button_colours(button)
+        self.on_ip_text(None)
 
     def new_button(self, parent, label: str):
         """Creates a push button, self drawn on macOS where native buttons don't stretch vertically

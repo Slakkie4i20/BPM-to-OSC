@@ -12,6 +12,16 @@ def normalize_ip(ip: str) -> str:
         return ip
 
 
+def parse_ip(ip: str):
+    """Strict version of normalize_ip: four octets 0-255.
+    Returns the normalized address, or None if ip isn't a valid IPv4 address.
+    """
+    octets = ip.replace(" ", "").split(".")
+    if len(octets) != 4 or not all(o.isascii() and o.isdigit() and int(o) <= 255 for o in octets):
+        return None
+    return ".".join(str(int(octet)) for octet in octets)
+
+
 class OSCclient():
 
     def __init__(self, ip: str, port: int):
