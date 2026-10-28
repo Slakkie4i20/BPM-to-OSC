@@ -4,3 +4,5 @@ pytoexe config.json
 installation tips.txt
 lastsession.ini
 output/BPMtoOSC.exe
+
+.venv/

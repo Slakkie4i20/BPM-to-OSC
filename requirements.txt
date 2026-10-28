@@ -1,6 +1,12 @@
-aubio==0.4.7
-numpy==1.23.4
-Pillow==9.3.0
-PyAudio==0.2.12
+# macOS (Apple Silicon) / cross-platform pins. Original Windows pins: requirements-windows.txt
+# Install order on macOS (Homebrew python@3.11 + portaudio):
+#   /opt/homebrew/bin/python3.11 -m venv .venv
+#   .venv/bin/pip install numpy==1.26.4
+#   CFLAGS="-I/opt/homebrew/include" LDFLAGS="-L/opt/homebrew/lib" .venv/bin/pip install PyAudio==0.2.14
+#   CFLAGS="-Wno-error=incompatible-function-pointer-types" .venv/bin/pip install --no-build-isolation aubio==0.4.9
+#   .venv/bin/pip install -r requirements.txt
+aubio==0.4.9
+numpy==1.26.4
+PyAudio==0.2.14
 python-osc==1.8.0
-wxPython==4.1.1
+wxPython==4.2.3
