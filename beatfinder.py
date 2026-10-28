@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 import pyaudio
 from collections import deque
@@ -6,6 +7,15 @@ from aubio import tempo
 
 #local
 import osc_client
+
+
+IS_MAC = sys.platform == "darwin"
+METER_FLOOR_DB = -72  # dBFS shown as an empty meter on macOS (built-in mics sit around -63 dBFS RMS)
+
+
+def db_to_meter(db: float) -> float:
+    """Maps dBFS (METER_FLOOR_DB..0) to the peak meter range 0..100"""
+    return max(0.0, db - METER_FLOOR_DB) * 100 / -METER_FLOOR_DB
 
 
 
@@ -89,7 +99,12 @@ class BeatDetector:
         beat = self.tempo(signal)
 
         # Calculate RMS Level for every frame and add it to a circular buffer
-        self.level_queue.append(int(np.sqrt(signal.dot(signal)/signal.size) * 200))  # 9,0ms
+        rms = np.sqrt(signal.dot(signal)/signal.size)
+        if IS_MAC:
+            # logarithmic, so quiet inputs still move the meter
+            self.level_queue.append(int(db_to_meter(20 * np.log10(rms + 1e-12))))
+        else:
+            self.level_queue.append(int(rms * 200))  # 9,0ms
         """alternative RMS functions:
         # cur = np.sqrt((signal*signal).sum()/(1.*len(signal)))*10000 #10,1ms
         #self.level = np.sqrt(signal.dot(signal)/signal.size) * 10000  # 9,0ms

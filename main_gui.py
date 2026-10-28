@@ -245,7 +245,12 @@ class Main_Frame(wx.Frame):
         self.peak_meter.SetMeterBands(1, 48)
         self.peak_meter.SetFalloffEffect(False)
         self.peak_meter.SetBandsColour((150, 220, 150), (255, 255, 150), (220, 150, 150))
-        self.peak_meter.SetRangeValue(20, 60, 80)
+        if IS_MAC:
+            # dB scale: green below -18 dBFS, yellow up to -6 dBFS, red above
+            self.peak_meter.SetRangeValue(int(beatfinder.db_to_meter(-18)), int(beatfinder.db_to_meter(-6)), 100)
+            self.peak_meter.SetData([0], 0, 1)  # bands start full otherwise
+        else:
+            self.peak_meter.SetRangeValue(20, 60, 80)
         #self.peak_meter.SetData([0], 0, 1)
 
         audiosizer.Add(self.peak_meter, 2, wx.EXPAND | wx.ALL | wx.FIXED_MINSIZE, border=5)
