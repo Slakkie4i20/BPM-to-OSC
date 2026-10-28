@@ -64,6 +64,15 @@ class _CentredLabelMixin:
         dc.DrawLabel(self.GetLabel(), wx.Rect(dx, dy, width, height), wx.ALIGN_CENTER)
 
 
+class FlatButton(_CentredLabelMixin, buttons.GenButton):
+    """Self drawn button that stretches to fill its sizer cell (used on macOS)"""
+
+    def __init__(self, parent, label):
+        super().__init__(parent, wx.ID_ANY, label)
+        self.SetBezelWidth(1)
+        self.SetUseFocusIndicator(False)
+
+
 class FlatToggleButton(_CentredLabelMixin, buttons.GenToggleButton):
     """Self drawn toggle button that honours colours and stretches (used on macOS)"""
 
@@ -117,6 +126,7 @@ class Main_Frame(wx.Frame):
 
         self.last_tap = list()  # list of taps to determine bpm
         self.buttons_to_disable = list()  # list of buttons to disableon start/stop
+        self.flat_buttons = list()  # self drawn buttons (macOS), re-coloured on light / dark switch
 
         # Flags
         self.bpm_blink = False  # Blinking sevenseg background
@@ -359,25 +369,25 @@ class Main_Frame(wx.Frame):
         sub_button_sizer_top_vert_1 = wx.BoxSizer(orient=wx.VERTICAL)
         sub_button_sizer_top_vert_2 = wx.BoxSizer(orient=wx.VERTICAL)
 
-        self.button_plus_one = wx.Button(panel, label='+1')
+        self.button_plus_one = self.new_button(panel, '+1')
         self.button_plus_one.SetFont(buttonfont)
         self.buttons_to_disable.append(self.button_plus_one)
         sub_button_sizer_top_vert_2.Add(self.button_plus_one, 1, flag=wx.EXPAND, border=10)
         self.Bind(wx.EVT_BUTTON, self.on_button_plus_one, self.button_plus_one)
 
-        self.button_minus_one = wx.Button(panel, label='-1')
+        self.button_minus_one = self.new_button(panel, '-1')
         self.button_minus_one.SetFont(buttonfont)
         self.buttons_to_disable.append(self.button_minus_one)
         sub_button_sizer_top_vert_1.Add(self.button_minus_one, 1, flag=wx.EXPAND, border=10)
         self.Bind(wx.EVT_BUTTON, self.on_button_minus_one, self.button_minus_one)
 
-        self.button_double = wx.Button(panel, label='x2')
+        self.button_double = self.new_button(panel, 'x2')
         self.button_double.SetFont(buttonfont)
         self.buttons_to_disable.append(self.button_double)
         sub_button_sizer_top_vert_2.Add(self.button_double, 1, flag=wx.EXPAND, border=10)
         self.Bind(wx.EVT_BUTTON, self.on_button_double, self.button_double)
 
-        self.button_half = wx.Button(panel, label='/2')
+        self.button_half = self.new_button(panel, '/2')
         self.button_half.SetFont(buttonfont)
         self.buttons_to_disable.append(self.button_half)
         sub_button_sizer_top_vert_1.Add(self.button_half, 1, flag=wx.EXPAND, border=10)
@@ -385,7 +395,7 @@ class Main_Frame(wx.Frame):
 
 # RESYNC BUTTON
 
-        self.button_resync = wx.Button(panel, label='RESYNC BAR')
+        self.button_resync = self.new_button(panel, 'RESYNC BAR')
         self.button_resync.SetFont(buttonfont)
         self.buttons_to_disable.append(self.button_resync)
         #sizer.Add(self.button_resync, pos=(12, 2), span=(2, 2),flag=wx.EXPAND | wx.ALL ^ wx.TOP, border=10)
@@ -410,7 +420,7 @@ class Main_Frame(wx.Frame):
         #sizer.Add(self.button_startstop, pos=(12, 0), span=(2, 2),flag=wx.EXPAND | wx.ALL ^ wx.TOP, border=10)
         sub_button_sizer_bot.Add(self.button_startstop, 1, flag=wx.EXPAND, border=10)
 
-        self.button_tap = wx.Button(panel, label='TAP')
+        self.button_tap = self.new_button(panel, 'TAP')
         self.button_tap.SetFont(buttonfont)
         self.buttons_to_disable.append(self.button_tap)
         sub_button_sizer_bot.Add(self.button_tap, 1, flag=wx.EXPAND, border=10)
@@ -552,7 +562,8 @@ class Main_Frame(wx.Frame):
 
     def on_button_sync(self, event):
         self.switch_sync(self.button_sync.GetValue())
-        self.button_resync.BackgroundColour = self.bg_grey
+        if not IS_MAC:  # would paint the self drawn button in the display colour on macOS
+            self.button_resync.BackgroundColour = self.bg_grey
 
     def on_button_resync(self, event):
         # reset bar animation
@@ -734,6 +745,28 @@ class Main_Frame(wx.Frame):
         if self.connection_ok is not None:
             self.text_connection.SetForegroundColour(self.status_ok if self.connection_ok else self.status_error)
         self.set_startstop_colours(self.running)
+        for button in self.flat_buttons:
+            self.set_button_colours(button)
+
+    def new_button(self, parent, label: str):
+        """Creates a push button, self drawn on macOS where native buttons don't stretch vertically
+
+        Args:
+            parent (wx.Window): parent window
+            label (str): button label
+        """
+        if not IS_MAC:
+            return wx.Button(parent, label=label)
+        button = FlatButton(parent, label)
+        self.set_button_colours(button)
+        self.flat_buttons.append(button)
+        return button
+
+    def set_button_colours(self, button):
+        """Colours a self drawn button like a regular button of the current light / dark mode"""
+        button.SetBackgroundColour(button_face_colour())
+        button.SetForegroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNTEXT))
+        button.Refresh()
 
     def set_sync_colours(self, state: bool):
         """Shows the sync state on the SYNC button
