@@ -22,22 +22,28 @@ class BeatPrinter:
 
 class BeatDetector:
 
-    def __init__(self, client: osc_client.OSCclient, audio_device_index: int = 1, parent=None, buf_size: int = 128):
+    def __init__(self, client: osc_client.OSCclient, audio_device_index: int = None, parent=None, buf_size: int = 128):
         # arguments
         self.client = client  # OSC client
-        self.audio_device_index = audio_device_index
+        self.audio_device_index = audio_device_index  # None = system default input
         self.parent = parent  # MainFrame
         self.buf_size: int = buf_size  # buffer size
-        
+
         # variables
         self.blink = 0  # blinking state flag
         self.bpm = 128
         self.beat_counter = 0 # for live beat divider
-        self.SAMPLERATE: int = 44100
         self.level_reset = None  # Timer for resetting level
         self.level_queue = deque(maxlen=20)  # RMS Level queue
         self.p: pyaudio.PyAudio = pyaudio.PyAudio()
-        self.tempo = tempo("default", self.buf_size * 2, self.buf_size, self.SAMPLERATE)            
+
+        # use the device's native rate (Windows MME reports 44100, most Mac inputs run at 48000)
+        if self.audio_device_index is None:
+            self.device_info = self.p.get_default_input_device_info()
+        else:
+            self.device_info = self.p.get_device_info_by_index(self.audio_device_index)
+        self.SAMPLERATE: int = int(self.device_info['defaultSampleRate'])
+        self.tempo = tempo("default", self.buf_size * 2, self.buf_size, self.SAMPLERATE)
 
         # Callback to GUI
         if self.parent is not None:
@@ -58,6 +64,7 @@ class BeatDetector:
                 channels=1,
                 rate=self.SAMPLERATE,
                 input=True,
+                input_device_index=self.audio_device_index,
                 frames_per_buffer=self.buf_size,
                 stream_callback=self._STANDALONE_callback
             )
@@ -157,10 +164,12 @@ class BeatDetector:
 
 if __name__ == "__main__":
     import os
+    import signal
     import time
 
     client = osc_client.OSCclient("127.0.0.1", 7000)
-    bd = BeatDetector(client, verbose=True, buf_size=128)
+    bd = BeatDetector(client, buf_size=128)
+    print(f"Listening on '{bd.device_info['name']}' @ {bd.SAMPLERATE} Hz")
     try:
         # Audio processing happens in separate thread, so put this thread to sleep
         if os.name == 'nt':  # Windows is not able to pause the main thread :(
