@@ -154,13 +154,19 @@ class BeatDetector:
         """Send resync command to Resolume"""
         self.client.send_osc(self.parent.config['OSC']['RESYNC_BAR_ADRESS'], 1)
 
-    def __del__(self):
-        """Close pyaudio stream and terminate pyaudio
+    def close(self):
+        """Close pyaudio stream and terminate pyaudio (safe to call more than once)
         """
+        if self.p is None:
+            return
         if self.level_reset is not None:
             self.level_reset.cancel()
         self.stream.close()
         self.p.terminate()
+        self.p = None
+
+    def __del__(self):
+        self.close()
 
 if __name__ == "__main__":
     import os

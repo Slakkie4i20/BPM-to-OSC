@@ -1,10 +1,21 @@
 from pythonosc.udp_client import SimpleUDPClient
 
 
+def normalize_ip(ip: str) -> str:
+    """Strip spaces and leading zeros ("127.000.000.001" -> "127.0.0.1").
+    macOS reads octets with leading zeros as octal ("010" -> 8).
+    """
+    ip = ip.replace(" ", "")
+    try:
+        return ".".join(str(int(octet)) for octet in ip.split("."))
+    except ValueError:
+        return ip
+
+
 class OSCclient():
 
     def __init__(self, ip: str, port: int):
-        self.__ip = ip.replace(" ", "")
+        self.__ip = normalize_ip(ip)
         self.__port = port
 
         self.__osc_client = SimpleUDPClient(self.ip, self.port)
@@ -20,7 +31,7 @@ class OSCclient():
 
     @ip.setter
     def ip(self, ip: str):
-        self.__ip = ip
+        self.__ip = normalize_ip(ip)
         self.__osc_client = SimpleUDPClient(self.ip, self.port)
 
     @property

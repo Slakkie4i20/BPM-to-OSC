@@ -12,6 +12,7 @@
 # - Darkmode?
 
 # Imports:
+import sys
 from os import remove, system
 from pathlib import Path
 from subprocess import call
@@ -38,7 +39,10 @@ class Main_Frame(wx.Frame):
     '''
     sel_msg_frame = None
     sel_bus_frame = None
-    CONF_PATH = Path(Path.home(), "AppData/Roaming/BPMtoOSC/lastsession.ini")
+    if sys.platform == "darwin":
+        CONF_PATH = Path(Path.home(), "Library/Application Support/BPMtoOSC/lastsession.ini")
+    else:
+        CONF_PATH = Path(Path.home(), "AppData/Roaming/BPMtoOSC/lastsession.ini")
     #CONF_PATH = Path("lastsession.ini")
 
     def __init__(self, parent=None):
@@ -58,7 +62,7 @@ class Main_Frame(wx.Frame):
 
         # Audio Setup
         self.audio = pyaudio.PyAudio()
-        self.audio_device = 1
+        self.input_devices = list()  # pyaudio device index for every combobox entry
 
         # OSC Setup
         self.osc_client = None
@@ -67,7 +71,7 @@ class Main_Frame(wx.Frame):
         self.beatfinder = None  # audio analysis instance
         self.send_bpm = 128  # sent bpm when sync is diasabled (used to hold last live or tap value)
         self.beat_divider = 1  # divides beat to get 1/2, 1/4
-        self.no_sync_send_thread = Thread(target=self.send_thread_when_no_sync)
+        self.no_sync_send_thread = Thread(target=self.send_thread_when_no_sync, daemon=True)
 
         self.bpm_thread_wait_and_terminate = Event()  # c based event to wait in thread or terminate
         self.bpm_thread_wait_and_terminate.clear()
@@ -115,7 +119,7 @@ class Main_Frame(wx.Frame):
                                       'PORT': 7000,
                                       'RESYNC_BAR_ADRESS': '/composition/tempocontroller/resync',
                                       'BPM_ADRESS': '/composition/tempocontroller/tempo'}
-                self.config['AUDIO'] = {'device_index': '1'}
+                self.config['AUDIO'] = {}  # empty = system default input
         except:
             if self.retrys > 0:
                 self.retrys -= 1
@@ -144,14 +148,14 @@ class Main_Frame(wx.Frame):
         # Textbox IP-Adress
         self.text_ip = ipctrl.IpAddrCtrl(panel)
         self.text_ip.SetValue(self.config['OSC']['IP'])
-        self.ip_stuff_sizer.Add(self.text_ip, 0, wx.LEFT | wx.RIGHT | wx.ALIGN_CENTER, border=5)
+        self.ip_stuff_sizer.Add(self.text_ip, 0, wx.LEFT | wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, border=5)
 
         # Numberbox Port
         self.text_port = wx.SpinCtrl(panel)
         self.text_port.SetMax(65535)
         self.text_port.SetMin(0)
         self.text_port.SetValue(self.config['OSC']['PORT'])
-        self.ip_stuff_sizer.Add(self.text_port, 0, wx.LEFT | wx.RIGHT | wx.ALIGN_CENTER, border=5)
+        self.ip_stuff_sizer.Add(self.text_port, 0, wx.LEFT | wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, border=5)
         
         #self.ip_stuff_sizer.AddStretchSpacer()
 
@@ -167,17 +171,17 @@ class Main_Frame(wx.Frame):
         self.ip_stuff_sizer.Add(self.send_format, 0, wx.LEFT | wx.ALIGN_CENTER, border=5)"""
 
         # Text Connectionstatus
-        self.text_connection = wx.StaticText(panel, label="", style=wx.EXPAND | wx.ALIGN_RIGHT | wx.ALIGN_BOTTOM)
+        self.text_connection = wx.StaticText(panel, label="", style=wx.ALIGN_RIGHT | wx.ALIGN_BOTTOM)
         self.text_connection.SetFont(wx.Font(12, family=wx.DEFAULT, style=wx.NORMAL, weight=wx.BOLD))
         self.text_connection.SetBackgroundColour(self.bg_grey)
         # Enter current status after trying to connect with ini information
-        self.ip_stuff_sizer.Add(self.text_connection, 2, wx.LEFT | wx.RIGHT | wx.ALIGN_CENTER, border=5)
+        self.ip_stuff_sizer.Add(self.text_connection, 2, wx.LEFT | wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, border=5)
 
         
 
         # Button Ping
         self.button_ping = wx.Button(panel, wx.ID_ANY, label="Ping")
-        self.ip_stuff_sizer.Add(self.button_ping, 0, wx.RIGHT | wx.LEFT | wx.ALIGN_CENTER, border=5)
+        self.ip_stuff_sizer.Add(self.button_ping, 0, wx.RIGHT | wx.LEFT | wx.ALIGN_CENTER_VERTICAL, border=5)
         self.Bind(wx.EVT_BUTTON, self.on_button_ping, self.button_ping)
         
         sizer.Add(self.ip_stuff_sizer, pos=(0, 0), span=(2, 4), flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, border=10)
@@ -188,8 +192,7 @@ class Main_Frame(wx.Frame):
 
         # Audio device selection
         self.audio_selection = wx.ComboBox(panel, style=wx.CB_READONLY)
-        self.on_button_reload(None)  # fill combobox with devices
-        self.audio_selection.SetSelection(int(self.config['AUDIO']['device_index']))
+        self.on_button_reload(None)  # fill combobox with devices and select last used one
 
         audiosizer.Add(self.audio_selection, 2, wx.EXPAND | wx.ALL, border=5)
 
@@ -415,25 +418,41 @@ class Main_Frame(wx.Frame):
         """Reloads the audio devices"""
 
         self.audio_selection.Clear()
+        self.input_devices = list()
+        names = list()
 
+        # host api 0 is MME on Windows and Core Audio on macOS
         info = self.audio.get_host_api_info_by_index(0)
         numdevices = info.get('deviceCount')
+        default_device = info.get('defaultInputDevice')
 
         for i in range(numdevices):
-            if (self.audio.get_device_info_by_host_api_device_index(0, i).get('maxInputChannels')) > 0:
-                # self.device_list.append((i) + " - " + self.audio.get_device_info_by_host_api_device_index(0, i).get('name'))
+            device = self.audio.get_device_info_by_host_api_device_index(0, i)
+            if device.get('maxInputChannels') > 0:
+                # combobox position != device index (Core Audio mixes inputs and outputs)
+                self.input_devices.append(device.get('index'))
+                names.append(device.get('name'))
 
-                if i != 1:
-                    self.audio_selection.Append(
-                        self.audio.get_device_info_by_host_api_device_index(0, i).get('name'))
+                if device.get('index') != default_device:
+                    self.audio_selection.Append(device.get('name'))
                 else:
-                    self.audio_selection.Append(
-                        "DEFAULT: " + self.audio.get_device_info_by_host_api_device_index(0, i).get('name'))
+                    self.audio_selection.Append("DEFAULT: " + device.get('name'))
         # self.audio_selection.Append(str(i) + " - " + self.audio.get_device_info_by_host_api_device_index(0, i).get('name'))
 
         # if function gets called from read last session
-        if event is None:
-            self.audio_selection.SetSelection(self.audio_device)
+        if event is None and names:
+            saved_name = self.config['AUDIO'].get('device_name')
+            saved_index = self.config['AUDIO'].get('device_index', '')
+
+            if saved_name in names:
+                selection = names.index(saved_name)
+            elif saved_index.isdigit() and int(saved_index) < len(names):  # lastsession.ini from older versions
+                selection = int(saved_index)
+            elif default_device in self.input_devices:
+                selection = self.input_devices.index(default_device)
+            else:
+                selection = 0
+            self.audio_selection.SetSelection(selection)
 
         """if event is not None:
             self.audio_selection.Popup()"""
@@ -496,16 +515,24 @@ class Main_Frame(wx.Frame):
             event (wx.EVENT): unused
         """
         if self.button_startstop.GetValue():
+            selection = self.audio_selection.GetSelection()
+            if selection == wx.NOT_FOUND:
+                print("No audio input device selected")
+                self.button_startstop.SetValue(False)
+                return
+
             print("Starting")
+            device_index = self.input_devices[selection]
 
             # save input to config
-            self.config['AUDIO']['device_index'] = str(self.audio_selection.GetSelection())
+            self.config['AUDIO']['device_index'] = str(selection)
+            self.config['AUDIO']['device_name'] = self.audio.get_device_info_by_index(device_index).get('name')
             self.config['OSC']['IP'] = self.text_ip.GetValue().replace(" ", "")
             self.config['OSC']['PORT'] = str(self.text_port.GetValue())
 
             # create worker instances
             self.osc_client = osc_client.OSCclient(self.config['OSC']['IP'], int(self.config['OSC']['PORT']))
-            self.beatfinder = beatfinder.BeatDetector(self.osc_client, self.audio_selection.GetSelection(), parent=self)
+            self.beatfinder = beatfinder.BeatDetector(self.osc_client, device_index, parent=self)
 
             # gui changes
             self.button_startstop.SetBackgroundColour((220, 150, 150))
@@ -521,6 +548,7 @@ class Main_Frame(wx.Frame):
             self.running = False
 
             # delete worker instances
+            self.beatfinder.close()
             del self.beatfinder
             self.beatfinder = None
             del self.osc_client
@@ -550,9 +578,14 @@ class Main_Frame(wx.Frame):
         self.config['OSC']['IP'] = self.text_ip.GetValue()
         self.config['OSC']['PORT'] = str(self.text_port.GetValue())
 
-        # send ping
-        param = '-n' if system().lower() == 'windows' else '-c'
-        command = ['ping', param, '1', self.config['OSC']['IP'].replace(" ", "")]
+        # send ping (with a short timeout, an unreachable host would otherwise block the GUI)
+        ip = osc_client.normalize_ip(self.config['OSC']['IP'])
+        if system().lower() == 'windows':
+            command = ['ping', '-n', '1', '-w', '2000', ip]  # timeout in ms
+        elif system().lower() == 'darwin':
+            command = ['ping', '-c', '1', '-t', '2', ip]  # timeout in s
+        else:
+            command = ['ping', '-c', '1', '-W', '2', ip]  # timeout in s
 
         # success
         if call(command) == 0:
@@ -588,7 +621,7 @@ class Main_Frame(wx.Frame):
             self.button_sync.SetValue(False)
             
             #must be called first to get the beat_divider into the thread
-            self.no_sync_send_thread = Thread(target=self.send_thread_when_no_sync)
+            self.no_sync_send_thread = Thread(target=self.send_thread_when_no_sync, daemon=True)
             self.no_sync_send_thread.start()
             
             #self.button_halftime.SetValue(False)
@@ -620,6 +653,8 @@ class Main_Frame(wx.Frame):
         # convert to array of chars
 
         def set_digits(bpm, send_to):
+            if not self:  # frame already destroyed
+                return
 
             bpm_digits = [d for d in str(bpm)]
             bpm_digits.reverse()
@@ -657,11 +692,17 @@ class Main_Frame(wx.Frame):
 
             self.bpm_blink = not (self.bpm_blink)
 
-        Thread(target=set_digits, args=(bpm, send_to)).start()
+        # widgets may only be touched from the GUI thread (crashes on macOS otherwise)
+        if wx.IsMainThread():
+            set_digits(bpm, send_to)
+        else:
+            wx.CallAfter(set_digits, bpm, send_to)
 
-    def next_led(self, reset=False, thread=True):
+    def next_led(self, reset=False):
 
         def set_leds(rst):
+            if not self:  # frame already destroyed
+                return
             def set_background(led, color: tuple):
                 # need to update label to see changes
                 led.SetBackgroundColour(color)
@@ -684,10 +725,11 @@ class Main_Frame(wx.Frame):
                 set_background(self.leds[-1], (50, 0, 0))
                 set_background(self.leds[self.led_counter], (200, 0, 0))
 
-        if thread:
-            Thread(target=set_leds, args=(reset,)).start()
-        else:
+        # widgets may only be touched from the GUI thread (crashes on macOS otherwise)
+        if wx.IsMainThread():
             set_leds(reset)
+        else:
+            wx.CallAfter(set_leds, reset)
 
     def send_thread_when_no_sync(self):
         """When sync is disabled, this thread sends the bpm showed in send display.\n
@@ -709,7 +751,7 @@ class Main_Frame(wx.Frame):
         # send bpm only on change
         while True:
             prev_time = time()  # time compensation
-            self.next_led(thread=False)
+            self.next_led()
             #self.osc_client.send_osc("/composition/tempocontroller/tempo", self.send_bpm, map_to_resolume=True)
 
             if prev_bpm != self.send_bpm:
@@ -737,6 +779,13 @@ class Main_Frame(wx.Frame):
                     pass
                 return
 
+        # stop audio stream and the no-sync send thread so the process can exit
+        self.running = False
+        self.bpm_thread_wait_and_terminate.set()
+        self.uv_timer.Stop()
+        if self.beatfinder:
+            self.beatfinder.close()
+
         # create directory if it does not exist
         self.CONF_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -753,17 +802,16 @@ class Main_Frame(wx.Frame):
         self.bpm_thread_wait_and_terminate.set()
         self.running = False
         self.sync = False
-        self.uv_timer.stop()
+        self.uv_timer.Stop()
         self.peak_meter.Stop()
 
-        self.no_sync_send_thread.join()
+        if self.no_sync_send_thread.is_alive():
+            self.no_sync_send_thread.join()
 
         if self.beatfinder:
             del self.beatfinder
         if self.osc_client:
             del self.osc_client
-
-        self.parent.Destroy()
 
 
 def main():
