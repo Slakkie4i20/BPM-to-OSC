@@ -125,11 +125,16 @@ class Main_Frame(wx.Frame):
         self.running = False
         self.retrys = 3
         self.led_counter = 3
+        self.connection_ok = None  # last ping result, None = not pinged yet
 
         self.Read_LastSession_ini()
         self.InitUI()
 
         self.Centre()  # centre window on screen
+
+        # follow light / dark mode switches (e.g. automatic appearance at sunset)
+        if IS_MAC:
+            self.Bind(wx.EVT_SYS_COLOUR_CHANGED, self.on_sys_colour_changed)
 
 # PEAK METER
         self.uv_timer = wx.Timer(self)
@@ -174,8 +179,7 @@ class Main_Frame(wx.Frame):
         sizer = wx.GridBagSizer(14, 4)
         
         # 7seg background blink
-        self.bg_grey = wx.Colour(240, 240, 240)
-        self.bg_a = (self.bg_grey,(220, 220, 220))
+        self.init_theme()
         #self.bg_b = (220, 220, 220), self.bg_grey
 
         buttonfont = wx.Font(20, family=wx.DEFAULT, style=wx.NORMAL, weight=wx.BOLD)
@@ -212,7 +216,8 @@ class Main_Frame(wx.Frame):
         # Text Connectionstatus
         self.text_connection = wx.StaticText(panel, label="", style=wx.ALIGN_RIGHT | wx.ALIGN_BOTTOM)
         self.text_connection.SetFont(wx.Font(12, family=wx.DEFAULT, style=wx.NORMAL, weight=wx.BOLD))
-        self.text_connection.SetBackgroundColour(self.bg_grey)
+        if not IS_MAC:  # transparent on macOS, a fixed light background clashes with dark mode
+            self.text_connection.SetBackgroundColour(self.bg_grey)
         # Enter current status after trying to connect with ini information
         self.ip_stuff_sizer.Add(self.text_connection, 2, wx.LEFT | wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, border=5)
 
@@ -285,7 +290,7 @@ class Main_Frame(wx.Frame):
         bpm_box_live = wx.StaticBoxSizer(wx.HORIZONTAL, panel, label="LIVE")
         for digit in self.live_disp:
             digit.SetTilt(5)
-            digit.SetColours(segment_on=((0, 71, 77)), background=self.bg_grey, segment_off=(220, 220, 220))
+            digit.SetColours(segment_on=self.seg_on_live, background=self.bg_a[0], segment_off=self.bg_a[1])
             digit.SetGeometry(width=38, height=38, thickness=10, separation=2)
             digit.EnableDot(False)
             digit.EnableColon(False)
@@ -296,7 +301,7 @@ class Main_Frame(wx.Frame):
         bpm_box_sending = wx.StaticBoxSizer(wx.HORIZONTAL, panel, label="SEND")
         for digit in self.send_disp:
             digit.SetTilt(5)
-            digit.SetColours(segment_on=(85, 0, 0), background=self.bg_grey, segment_off=(220, 220, 220))
+            digit.SetColours(segment_on=self.seg_on_send, background=self.bg_a[0], segment_off=self.bg_a[1])
             digit.SetGeometry(width=38, height=38, thickness=10, separation=2)
             digit.EnableDot(False)
             digit.EnableColon(False)
@@ -639,14 +644,16 @@ class Main_Frame(wx.Frame):
 
         # success
         if call(command) == 0:
-            self.text_connection.SetForegroundColour((0, 184, 0))
+            self.connection_ok = True
+            self.text_connection.SetForegroundColour(self.status_ok)
             self.text_connection.SetLabel("Reachable")
             self.ip_stuff_sizer.Layout()
 
         # no answer
         else:
             print('No ping answer')
-            self.text_connection.SetForegroundColour((220, 0, 0))
+            self.connection_ok = False
+            self.text_connection.SetForegroundColour(self.status_error)
             self.text_connection.SetLabel("Unreachable")
             self.ip_stuff_sizer.Layout()
 
@@ -691,6 +698,37 @@ class Main_Frame(wx.Frame):
             self.button_halftime.Enable()
         else:
             print("Sync state already set to {}".format(state))
+
+    def init_theme(self):
+        """Colours for the seven segment displays and the connection status.
+        macOS follows the system appearance (light / dark), Windows keeps the original colours.
+        """
+        if IS_MAC:
+            dark = wx.SystemSettings.GetAppearance().IsDark()
+            self.bg_grey = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+            self.bg_a = (self.bg_grey, self.bg_grey.ChangeLightness(118 if dark else 88))  # (background, segment off)
+            self.seg_on_live = wx.Colour(0, 190, 200) if dark else wx.Colour(0, 71, 77)
+            self.seg_on_send = wx.Colour(235, 60, 60) if dark else wx.Colour(85, 0, 0)
+            self.status_ok = wx.Colour(80, 220, 80) if dark else wx.Colour(0, 140, 0)
+            self.status_error = wx.Colour(255, 90, 90) if dark else wx.Colour(200, 0, 0)
+        else:
+            self.bg_grey = wx.Colour(240, 240, 240)
+            self.bg_a = (self.bg_grey,(220, 220, 220))
+            self.seg_on_live = (0, 71, 77)
+            self.seg_on_send = (85, 0, 0)
+            self.status_ok = (0, 184, 0)
+            self.status_error = (220, 0, 0)
+
+    def on_sys_colour_changed(self, event):
+        """Re-colours the custom drawn parts when macOS switches between light and dark mode"""
+        event.Skip()
+        self.init_theme()
+        for disp, segment_on in ((self.live_disp, self.seg_on_live), (self.send_disp, self.seg_on_send)):
+            for digit in disp:
+                digit.SetColours(segment_on=segment_on, background=self.bg_a[0], segment_off=self.bg_a[1])
+        if self.connection_ok is not None:
+            self.text_connection.SetForegroundColour(self.status_ok if self.connection_ok else self.status_error)
+        self.set_startstop_colours(self.running)
 
     def set_sync_colours(self, state: bool):
         """Shows the sync state on the SYNC button
