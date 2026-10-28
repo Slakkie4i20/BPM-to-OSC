@@ -6,3 +6,8 @@ lastsession.ini
 output/BPMtoOSC.exe
 
 .venv/
+
+# macOS build output (build_mac.sh)
+build/
+dist/
+*.dmg
