@@ -40,6 +40,14 @@ IS_MAC = sys.platform == "darwin"
 # SYNC button colours on macOS (native buttons ignore colours there)
 SYNC_ON_COLOUR = wx.Colour(0, 140, 0)
 SYNC_OFF_COLOUR = wx.Colour(200, 0, 0)
+# START/STOP while running, deliberately not red (red = sync off)
+RUNNING_COLOUR = wx.Colour(0, 95, 180)
+
+
+def button_face_colour():
+    """Face colour for self drawn buttons, a bit lighter (dark mode) or darker than the window"""
+    dark = wx.SystemSettings.GetAppearance().IsDark()
+    return wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW).ChangeLightness(125 if dark else 90)
 
 
 class _CentredLabelMixin:
@@ -380,11 +388,17 @@ class Main_Frame(wx.Frame):
 # START STOP & TAP BUTTON (BPM) BUTTON
         sub_button_sizer_bot = wx.BoxSizer(orient=wx.HORIZONTAL)
 
-        self.button_startstop = wx.ToggleButton(panel, label='START / STOP')
+        if IS_MAC:
+            # label switches to STOP while running, native buttons ignore colours on macOS
+            self.button_startstop = FlatToggleButton(panel, label='START')
+            self.set_startstop_colours(False)
+            self.Bind(wx.EVT_BUTTON, self.on_button_startstop, self.button_startstop)
+        else:
+            self.button_startstop = wx.ToggleButton(panel, label='START / STOP')
+            self.Bind(wx.EVT_TOGGLEBUTTON, self.on_button_startstop, self.button_startstop)
         self.button_startstop.SetFont(buttonfont)
         #sizer.Add(self.button_startstop, pos=(12, 0), span=(2, 2),flag=wx.EXPAND | wx.ALL ^ wx.TOP, border=10)
         sub_button_sizer_bot.Add(self.button_startstop, 1, flag=wx.EXPAND, border=10)
-        self.Bind(wx.EVT_TOGGLEBUTTON, self.on_button_startstop, self.button_startstop)
 
         self.button_tap = wx.Button(panel, label='TAP')
         self.button_tap.SetFont(buttonfont)
@@ -571,7 +585,7 @@ class Main_Frame(wx.Frame):
             self.beatfinder = beatfinder.BeatDetector(self.osc_client, device_index, parent=self)
 
             # gui changes
-            self.button_startstop.SetBackgroundColour((220, 150, 150))
+            self.set_startstop_colours(True)
             self.audio_selection.Disable()
             for b in self.buttons_to_disable:
                 b.Enable()
@@ -594,7 +608,7 @@ class Main_Frame(wx.Frame):
             self.audio_selection.Enable()
             for b in self.buttons_to_disable:
                 b.Disable()
-            self.button_startstop.SetBackgroundColour(wx.NullColour)
+            self.set_startstop_colours(False)
             self.peak_meter.SetData([0], 0, 1)
             self.update_bpm_display("---", send_to="both")
 
@@ -691,6 +705,21 @@ class Main_Frame(wx.Frame):
             self.button_sync.Refresh()
         else:
             self.button_sync.SetForegroundColour((150, 220, 150) if state else (220, 150, 150))
+
+    def set_startstop_colours(self, running: bool):
+        """Shows the running state on the START/STOP button
+
+        Args:
+            running (bool): audio analysis running
+        """
+        if IS_MAC:
+            self.button_startstop.SetLabel('STOP' if running else 'START')
+            self.button_startstop.SetBackgroundColour(RUNNING_COLOUR if running else button_face_colour())
+            self.button_startstop.SetForegroundColour(
+                wx.WHITE if running else wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNTEXT))
+            self.button_startstop.Refresh()
+        else:
+            self.button_startstop.SetBackgroundColour((220, 150, 150) if running else wx.NullColour)
 
     def update_bpm_display(self, bpm, send_to: str = "both", Blink=False):
         """Iterates through digits and sets them accordinglly
