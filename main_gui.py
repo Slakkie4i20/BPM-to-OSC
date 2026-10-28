@@ -436,13 +436,22 @@ class Main_Frame(wx.Frame):
 
         # some window properties
         self.Bind(wx.EVT_CLOSE, self.close)
-        self.SetMinSize(wx.Size(645, 650))
-        self.SetMaxSize(wx.Size(950, 750))
+        if not IS_MAC:
+            self.SetMinSize(wx.Size(645, 650))
+            self.SetMaxSize(wx.Size(950, 750))
         # self.SetBackgroundColour((92,92,92))
         sizer.AddGrowableCol(2)
         sizer.AddGrowableRow(7)
         panel.SetSizer(sizer)
         sizer.Fit(self)
+
+        if IS_MAC:
+            # never smaller than the laid out content (fonts and controls differ from Windows),
+            # open at least as large as the Windows window
+            fitted = self.GetSize()
+            self.SetMinSize(fitted)
+            self.SetMaxSize(wx.Size(max(fitted.width, 1200), max(fitted.height, 900)))
+            self.SetSize(wx.Size(max(fitted.width, 645), max(fitted.height, 650)))
 
     def on_button_plus_one(self, event):
         self.on_button_halftime(None, reset=True)
